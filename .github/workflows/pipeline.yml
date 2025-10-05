@@ -1,0 +1,24 @@
+name: immo-agent-pipeline
+on:
+  schedule:
+    - cron: '0 12 * * *'
+    - cron: '0 16 * * *'
+    - cron: '0 22 * * *'
+  workflow_dispatch: {}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - run: python -m src.run_pipeline
+      - name: Commit outputs
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@example.com"
+          git add output/*.xlsx reports/*.html || true
+          git commit -m "update outputs" || echo "no changes"
+          git push || echo "no push (no token)"
