@@ -1,0 +1,27 @@
+
+sources:
+  - name: Laforet
+    type: html
+    enabled: true
+    allowed: true
+    base_url: "https://www.laforet.com/"
+  - name: BienIci
+    type: html
+    enabled: true
+    allowed: true
+    base_url: "https://www.bienici.com/"
+  - name: LogicImmo
+    type: html
+    enabled: true
+    allowed: true
+    base_url: "https://www.logic-immo.com/"
+  - name: ORPI
+    type: html
+    enabled: true
+    allowed: true
+    base_url: "https://www.orpi.com/"
+  - name: AgencesLocales
+    type: html
+    enabled: true
+    allowed: true
+    base_url: "https://exemple-agence-guadeloupe.fr/"
