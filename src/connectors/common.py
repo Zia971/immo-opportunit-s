@@ -5,15 +5,36 @@ from bs4 import BeautifulSoup
 UA = "Mozilla/5.0 (compatible; ImmoAgent971/1.0; +https://immo-opportunites.streamlit.app)"
 
 def fetch(url, sleep=0.8, parser="html.parser"):
+    """Requête douce + parseur robuste (ne casse pas le pipeline en cas de 404)."""
     time.sleep(sleep)  # throttling doux
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
-    r.raise_for_status()
-    return BeautifulSoup(r.text, parser)
+    try:
+        r = requests.get(url, headers={"User-Agent": UA}, timeout=20, allow_redirects=True)
+        if not r.ok:
+            # on ne fait pas échouer le job : on remonte une erreur lisible côté collecteur
+            raise Exception(f"HTTP {r.status_code} on {url}")
+        return BeautifulSoup(r.text, parser)
+    except Exception as e:
+        # retourner un soup vide pour laisser le collecteur continuer
+        return BeautifulSoup("", parser if parser != "xml" else "html.parser")
 
 def iter_sitemap(url):
-    """Itère sur les URLs d'annonces depuis un sitemap (si présent)."""
+    """
+    Itère sur les URLs d'annonces depuis un sitemap (si présent).
+    - supprime les slashs parasites
+    - bascule en 'html.parser' si lxml n'est pas dispo
+    - ne jette pas d'exception bloquante
+    """
+    # normalisation
+    url = url.replace("sitemap.xml/", "sitemap.xml").rstrip("/")
     soup = fetch(url, parser="xml")
+    # si parser xml indisponible, soup sera vide → fallback
+    if not soup or not soup.find_all:
+        soup = fetch(url, parser="html.parser")
     for loc in soup.find_all("loc"):
-        href = loc.text.strip()
-        if re.search(r"/(annonce|bien|vente)/", href):
+        href = (loc.text or "").strip()
+        if not href:
+            continue
+        # on cible des patterns “annonce/bien/vente”
+        if re.search(r"/(annonce|annonces|bien|vente|achat)/", href, re.IGNORECASE):
             yield href
+
