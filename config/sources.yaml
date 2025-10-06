@@ -1,27 +1,44 @@
 
 sources:
-  - name: Laforet
-    type: html
+  # VERTS (OK robots/sitemaps) – intégration douce
+  - name: Laforet971
+    type: sitemap
     enabled: true
-    allowed: true
     base_url: "https://www.laforet.com/"
+    sitemap: "https://www.laforet.com/sitemap.xml"
+
+  - name: Orpi971
+    type: sitemap
+    enabled: true
+    base_url: "https://www.orpi.com/"
+    sitemap: "https://www.orpi.com/sitemap.xml"
+
   - name: BienIci
     type: html
     enabled: true
-    allowed: true
     base_url: "https://www.bienici.com/"
+    note: "On vise les pages listings publiques Guadeloupe (routes autorisées)."
+
   - name: LogicImmo
     type: html
     enabled: true
-    allowed: true
     base_url: "https://www.logic-immo.com/"
-  - name: ORPI
+    note: "Pages annonces publiques; pas de routes explicitement interdites."
+
+  # Portail DOM (JAUNE) – pages publiques ok
+  - name: Domimmo
     type: html
     enabled: true
-    allowed: true
-    base_url: "https://www.orpi.com/"
+    base_url: "https://www.domimmo.com/"
+    note: "Crawl léger des pages annonces 971 si conforme à robots."
+
+  # Agences locales (VERT) – à compléter au fil de l’eau
   - name: AgencesLocales
     type: html
     enabled: true
-    allowed: true
-    base_url: "https://exemple-agence-guadeloupe.fr/"
+    base_urls:
+      - "https://www.immo971.com/"
+      - "https://www.immovital.com/"
+      - "https://www.karukimo.fr/"
+      - "https://www.ocea-immobilier.fr/"
+    note: "Listings publics / sitemaps. On peut en ajouter d’autres ensuite."
