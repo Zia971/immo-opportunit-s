@@ -79,7 +79,15 @@ def main():
     targets = build_targets(crit_df)
 
     raw = load_sources_data()
-    raw["id"] = raw["id"].fillna(raw["url"])
+    # Sécurisation de la colonne ID
+if "id" not in raw.columns:
+    # Crée un identifiant unique basé sur l'URL si absent
+    raw["id"] = raw["url"].fillna("").apply(lambda x: hash(x))
+
+else:
+    # Si la colonne existe, on complète les valeurs manquantes
+    raw["id"] = raw["id"].fillna(raw["url"].apply(lambda x: hash(x)))
+
     hist = update_history(raw)
     df = normalize(raw)
     df = enrich_with_history(df, hist)
