@@ -10,11 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - run: pip install -r requirements.txt
-      - run: python src/run_pipeline.py
+
+      # 👉 Ajoute ce step pour que Python trouve le dossier src/
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/src" >> $GITHUB_ENV
+
+      # 👉 Garde ta commande actuelle
+      - name: Run pipeline
+        run: python src/run_pipeline.py
+
       - name: Commit outputs
         run: |
           git config user.name "bot"
@@ -22,3 +32,4 @@ jobs:
           git add output/*.xlsx reports/*.html || true
           git commit -m "update outputs" || echo "no changes"
           git push || echo "no push (no token)"
+
