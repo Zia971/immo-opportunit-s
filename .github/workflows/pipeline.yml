@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt lxml
 
       # 👉 Ajoute ce step pour que Python trouve le dossier src/
       - name: Set PYTHONPATH
