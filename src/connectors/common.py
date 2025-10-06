@@ -10,31 +10,26 @@ def fetch(url, sleep=0.8, parser="html.parser"):
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=20, allow_redirects=True)
         if not r.ok:
-            # on ne fait pas échouer le job : on remonte une erreur lisible côté collecteur
             raise Exception(f"HTTP {r.status_code} on {url}")
         return BeautifulSoup(r.text, parser)
-    except Exception as e:
-        # retourner un soup vide pour laisser le collecteur continuer
+    except Exception:
+        # retourne un soup vide pour laisser le collecteur continuer
         return BeautifulSoup("", parser if parser != "xml" else "html.parser")
 
 def iter_sitemap(url):
     """
     Itère sur les URLs d'annonces depuis un sitemap (si présent).
     - supprime les slashs parasites
-    - bascule en 'html.parser' si lxml n'est pas dispo
+    - bascule en 'html.parser' si lxml indisponible
     - ne jette pas d'exception bloquante
     """
-    # normalisation
     url = url.replace("sitemap.xml/", "sitemap.xml").rstrip("/")
     soup = fetch(url, parser="xml")
-    # si parser xml indisponible, soup sera vide → fallback
     if not soup or not soup.find_all:
         soup = fetch(url, parser="html.parser")
     for loc in soup.find_all("loc"):
         href = (loc.text or "").strip()
         if not href:
             continue
-        # on cible des patterns “annonce/bien/vente”
         if re.search(r"/(annonce|annonces|bien|vente|achat)/", href, re.IGNORECASE):
             yield href
-
