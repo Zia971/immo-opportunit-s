@@ -1,4 +1,3 @@
-
 # src/run_pipeline.py
 import os
 import pandas as pd
@@ -9,7 +8,6 @@ from src.normalizer import normalize
 from src.connectors.collect import collect_all
 
 DATA_DIR = "data"
-HISTORY_CSV = f"{DATA_DIR}/history.csv"
 SNAPSHOT_CSV = f"{DATA_DIR}/snapshot.csv"
 
 
@@ -24,59 +22,70 @@ def ensure_dirs():
 
 
 def load_sources_data() -> pd.DataFrame:
-    """
-    Récupère les annonces depuis les connecteurs.
-    Doit retourner un DataFrame avec au minimum: url, title, price_total, surface_hab, bedrooms, photos.
-    """
+    """Collecte brut des annonces depuis les connecteurs."""
     rows = collect_all()  # liste de dicts
     base_cols = [
-        "id", "url", "title", "price_total", "surface_hab", "bedrooms",
-        "copro_lots", "charges_copro_an", "taxe_fonciere", "ppr_zone",
-        "plu_zone", "age_days", "price_drop_pct", "status", "rent_potential",
-        "capex_ratio", "yield_net", "cashflow", "division_possible",
-        "colocation_ready", "outdoor", "sanitation", "dist_amen_min", "photos",
-        "source_name"
+        "id","url","title","price_total","surface_hab","bedrooms",
+        "copro_lots","charges_copro_an","taxe_fonciere","ppr_zone","plu_zone",
+        "age_days","price_drop_pct","status","rent_potential","capex_ratio",
+        "yield_net","cashflow","division_possible","colocation_ready","outdoor",
+        "sanitation","dist_amen_min","photos","source_name"
     ]
     if not rows:
-        return pd.DataFrame(columns=base_cols)
-    df = pd.DataFrame(rows)
-    # Garantit la présence des colonnes clés dès maintenant
-    for c in base_cols:
+        df = pd.DataFrame(columns=base_cols)
+    else:
+        df = pd.DataFrame(rows)
+        for c in base_cols:
+            if c not in df.columns:
+                df[c] = None
+        df = df[base_cols]
+    # garde-fous
+    if "id" not in df.columns:
+        df["id"] = df.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x))
+    if "price_drop_pct" not in df.columns:
+        df["price_drop_pct"] = 0.0
+    if "status" not in df.columns:
+        df["status"] = "available"
+    return df
+
+
+def read_snapshot() -> pd.DataFrame:
+    """Lit le snapshot historique et garantit les colonnes requises."""
+    cols = ["id","first_seen","last_seen","last_price","status","price_drop_pct"]
+    if os.path.exists(SNAPSHOT_CSV):
+        snap = pd.read_csv(SNAPSHOT_CSV)
+    else:
+        snap = pd.DataFrame(columns=cols)
+    # ajoute colonnes manquantes si ancien fichier
+    for c in cols:
+        if c not in snap.columns:
+            snap[c] = pd.NA
+    # types
+    snap["price_drop_pct"] = pd.to_numeric(snap["price_drop_pct"], errors="coerce").fillna(0.0)
+    snap["status"] = snap["status"].fillna("available")
+    return snap[cols]
+
+
+def write_snapshot(df: pd.DataFrame) -> None:
+    cols = ["id","first_seen","last_seen","last_price","status","price_drop_pct"]
+    for c in cols:
         if c not in df.columns:
-            df[c] = None
-    return df[base_cols]
+            df[c] = pd.NA
+    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
+    df["status"] = df["status"].fillna("available")
+    df[cols].to_csv(SNAPSHOT_CSV, index=False)
 
 
 def update_history(df_now: pd.DataFrame) -> pd.DataFrame:
-    """
-    Crée/Met à jour l'historique pour calculer:
-    - first_seen / last_seen
-    - last_price
-    - price_drop_pct
-    """
+    """Met à jour first_seen / last_seen / last_price / price_drop_pct."""
     ensure_dirs()
+    prev = read_snapshot().set_index("id")
 
-    if os.path.exists(SNAPSHOT_CSV):
-        prev = pd.read_csv(SNAPSHOT_CSV)
-    else:
-        prev = pd.DataFrame(columns=["id", "first_seen", "last_seen", "last_price", "status", "price_drop_pct"])
-
-    # filets de sécurité sur df_now
-    if "id" not in df_now.columns:
-        df_now["id"] = df_now.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x))
-    if "price_total" not in df_now.columns:
-        df_now["price_total"] = 0
-    if "status" not in df_now.columns:
-        df_now["status"] = "available"
-
-    out_rows = []
-    prev = prev.set_index("id") if len(prev) else pd.DataFrame().set_index(pd.Index([]))
-
+    out = []
     for _, r in df_now.iterrows():
         rid = str(r.get("id") or r.get("url") or "")
-        if rid == "":
+        if not rid:
             continue
-
         price = float(r.get("price_total", 0) or 0)
         status = str(r.get("status", "available") or "available")
         now = _utcnow_iso()
@@ -84,27 +93,24 @@ def update_history(df_now: pd.DataFrame) -> pd.DataFrame:
         if rid in prev.index:
             first_seen = prev.loc[rid, "first_seen"]
             last_price = float(prev.loc[rid, "last_price"] or 0)
-            price_drop_pct = 0.0
+            drop = 0.0
             if price and last_price and price < last_price:
                 try:
-                    price_drop_pct = round((last_price - price) / last_price * 100, 2)
+                    drop = round((last_price - price) / last_price * 100, 2)
                 except Exception:
-                    price_drop_pct = 0.0
-            out_rows.append(dict(
+                    drop = 0.0
+            out.append(dict(
                 id=rid, first_seen=first_seen, last_seen=now,
-                last_price=price, status=status, price_drop_pct=price_drop_pct
+                last_price=price, status=status, price_drop_pct=drop
             ))
         else:
-            out_rows.append(dict(
+            out.append(dict(
                 id=rid, first_seen=now, last_seen=now,
                 last_price=price, status=status, price_drop_pct=0.0
             ))
 
-    snap_new = pd.DataFrame(out_rows)
-    # s'assure que la colonne price_drop_pct est bien là
-    if "price_drop_pct" not in snap_new.columns:
-        snap_new["price_drop_pct"] = 0.0
-    snap_new.to_csv(SNAPSHOT_CSV, index=False)
+    snap_new = pd.DataFrame(out)
+    write_snapshot(snap_new)
     return snap_new
 
 
@@ -112,49 +118,45 @@ def enrich_with_history(df: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.assign(price_drop_pct=0.0, age_days=0, is_returned=False, status="available")
 
-    # colonnes attendues côté historique
-    cols = ["id", "first_seen", "last_seen", "last_price", "price_drop_pct", "status"]
-    hist = hist.reindex(columns=cols, fill_value=pd.NA)  # garantit price_drop_pct présent
-    merged = df.merge(hist, on="id", how="left")
+    # garantir colonnes hist
+    cols = ["id","first_seen","last_seen","last_price","status","price_drop_pct"]
+    for c in cols:
+        if c not in hist.columns:
+            hist[c] = pd.NA
+    hist["price_drop_pct"] = pd.to_numeric(hist["price_drop_pct"], errors="coerce").fillna(0.0)
+    hist["status"] = hist["status"].fillna("available")
 
-    # normalisations robustes
+    merged = df.merge(hist[cols], on="id", how="left")
+    # si price_drop_pct a disparu pendant le merge (ne devrait pas), on recrée
+    if "price_drop_pct" not in merged.columns:
+        merged["price_drop_pct"] = 0.0
     merged["price_drop_pct"] = pd.to_numeric(merged["price_drop_pct"], errors="coerce").fillna(0.0)
-    merged["status"] = merged["status"].fillna("available")
+
     merged["first_seen"] = merged["first_seen"].fillna(merged["last_seen"])
     merged["age_days"] = merged["first_seen"].apply(
         lambda x: 0 if pd.isna(x) else (pd.Timestamp.utcnow() - pd.to_datetime(x, utc=True)).days
     )
-    merged["is_returned"] = False  # activer quand on trackera under_offer -> available
+    merged["is_returned"] = False
+    merged["status"] = merged["status"].fillna("available")
     return merged
 
 
 def main():
     ensure_dirs()
 
-    # 1) Calibration (depuis ton Excel)
+    # 1) Calibration (Excel)
     crit_df, cat_weights = load_calibration("criteres_recherche_immo_FINAL.xlsx")
     targets = build_targets(crit_df)
 
-    # 2) Collecte sources
+    # 2) Collecte
     raw = load_sources_data()
 
-    # 🧱 Sécurisation des colonnes essentielles
-    if "id" not in raw.columns:
-        raw["id"] = raw.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x))
-    else:
-        raw["id"] = raw["id"].where(raw["id"].notna(), raw.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x)))
-    if "price_drop_pct" not in raw.columns:
-        raw["price_drop_pct"] = 0.0
-    if "status" not in raw.columns:
-        raw["status"] = "available"
-
-    # 3) Historique (baisse %, ancienneté)
+    # 3) Historique
     hist = update_history(raw)
 
     # 4) Normalisation + enrichissement
     df = normalize(raw)
-    # filet: si le normalizer n'a pas encore la colonne, on la crée
-    if "price_drop_pct" not in df.columns:
+    if "price_drop_pct" not in df.columns:  # filet de sécurité
         df["price_drop_pct"] = 0.0
     df = enrich_with_history(df, hist)
 
