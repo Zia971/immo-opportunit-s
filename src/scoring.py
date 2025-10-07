@@ -137,39 +137,54 @@ def score_listing(row, targets, cat_weights):
 
     score, excl, logs = 0.0, False, []
 
-    # --- Localisation & Urbanisme ---
-    t = targets.get("Risques naturels")
-    if t:
-        apply_rule(str(row.get("ppr_zone", "")).lower().startswith("hors"), t, "Localisation & Urbanisme")
+   # --- Localisation & Urbanisme ---
+t = targets.get("Risques naturels")
+if t:
+    ppr = str(row.get("ppr_zone", "") or "").strip().lower()
+    # ✅ Vide = NEUTRE (pas d'exclusion). Exclusion seulement si clairement en zone rouge.
+    ok = True if ppr == "" else (ppr.startswith("hors") or ppr in ["zone blanche","zone bleue","bleue","blanche"])
+    apply_rule(ok, t, "Localisation & Urbanisme")
 
-    t = targets.get("Zonage PLU")
-    if t:
-        apply_rule(str(row.get("plu_zone", "")).upper() in ["U", "AU"], t, "Localisation & Urbanisme")
+t = targets.get("Zonage PLU")
+if t:
+    plu = str(row.get("plu_zone", "") or "").strip().upper()
+    # ✅ Vide = NEUTRE. OK si U / AU, sinon neutre.
+    ok = True if plu == "" else (plu in ["U", "AU"])
+    apply_rule(ok, t, "Localisation & Urbanisme")
 
-    t = targets.get("Distance commerces")
-    if t:
-        apply_rule(float(row.get("dist_amen_min", 999)) <= 10, t, "Localisation & Urbanisme")
+t = targets.get("Distance commerces")
+if t:
+    # ✅ Vide / NaN = NEUTRE (pas de malus). OK si <= 10 quand dispo.
+    try:
+        dist = float(row.get("dist_amen_min", ""))
+        ok = dist <= 10
+    except Exception:
+        ok = True  # neutre
+    apply_rule(ok, t, "Localisation & Urbanisme")
 
     # --- Caractéristiques du bien ---
-    t = targets.get("Nombre de lots")
-    if t:
-        apply_rule((int(row.get("copro_lots", 0)) == 0) or (int(row.get("copro_lots", 0)) <= 40), t, "Caractéristiques du bien")
+t = targets.get("Nombre de lots")
+if t:
+    lots = row.get("copro_lots", None)
+    try:
+        lots_i = int(lots) if lots not in [None, ""] else 0
+    except Exception:
+        lots_i = 0
+    ok = (lots_i == 0) or (lots_i <= 40)
+    apply_rule(ok, t, "Caractéristiques du bien")
 
-    t = targets.get("Quote-part annuelle")
-    if t and int(row.get("copro_lots", 0)) > 0:
-        apply_rule(float(row.get("charges_copro_an", 1e9)) <= 1400, t, "Caractéristiques du bien")
-
-    t = targets.get("chambres")
-    if t:
-        apply_rule(int(row.get("bedrooms", 0)) >= 3, t, "Caractéristiques du bien")
-
-    t = targets.get("Surface habitable")
-    if t:
-        apply_rule(float(row.get("surface_hab", 0)) >= 65, t, "Caractéristiques du bien")
-
-    t = targets.get("Extérieur")
-    if t:
-        apply_rule(bool(row.get("outdoor", False)), t, "Caractéristiques du bien")
+t = targets.get("Quote-part annuelle")
+if t:
+    try:
+        lots_i = int(row.get("copro_lots", 0) or 0)
+    except Exception:
+        lots_i = 0
+    if lots_i > 0:
+        try:
+            ok = float(row.get("charges_copro_an", 1e9)) <= 1400
+        except Exception:
+            ok = True  # neutre si inconnu
+        apply_rule(ok, t, "Caractéristiques du bien")
 
     # --- Rentabilité & Finance ---
     t = targets.get("Budget max")
@@ -189,19 +204,18 @@ def score_listing(row, targets, cat_weights):
         apply_rule(float(row.get("taxe_fonciere", 1e9)) <= 4500, t, "Rentabilité & Finance")
 
     # --- Travaux & Potentiel ---
-    t = targets.get("Travaux")
-    if t:
-        capex = float(row.get("capex_ratio", 1.0))
-        y = float(row.get("yield_net", 0))
-        apply_rule((capex <= 0.25) or (capex > 0.25 and y >= 8.5), t, "Travaux & Potentiel")
-
-    t = targets.get("Division possible")
-    if t:
-        apply_rule(bool(row.get("division_possible", False)), t, "Travaux & Potentiel")
-
-    t = targets.get("Potentiel colocation")
-    if t:
-        apply_rule(bool(row.get("colocation_ready", False)) and int(row.get("bedrooms", 0)) >= 3, t, "Travaux & Potentiel")
+t = targets.get("Travaux")
+if t:
+    try:
+        capex = float(row.get("capex_ratio", ""))
+    except Exception:
+        capex = None
+    y = float(row.get("yield_net", 0) or 0)
+    if capex is None:
+        ok = True  # neutre si inconnu
+    else:
+        ok = (capex <= 0.25) or (capex > 0.25 and y >= 8.5)
+    apply_rule(ok, t, "Travaux & Potentiel")
 
     # --- Historique & Dynamique ---
     t = targets.get("baisse de prix")
