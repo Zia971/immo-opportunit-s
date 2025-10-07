@@ -15,10 +15,15 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         if c not in df.columns:
             df[c] = None
 
+    # price_drop_pct doit exister, sinon 0.0
+    if "price_drop_pct" not in df.columns:
+        df["price_drop_pct"] = 0.0
+    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
+
     # Conversions numériques sûres
     num_cols = [
         "price_total","surface_hab","bedrooms","copro_lots","charges_copro_an","taxe_fonciere",
-        "age_days","price_drop_pct","capex_ratio","yield_net","cashflow","dist_amen_min"
+        "age_days","capex_ratio","yield_net","cashflow","dist_amen_min"
     ]
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
