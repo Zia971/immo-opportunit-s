@@ -21,48 +21,59 @@ def ensure_dirs():
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def load_sources_data() -> pd.DataFrame:
-    """Collecte brut des annonces depuis les connecteurs."""
-    rows = collect_all()  # liste de dicts
-    base_cols = [
-        "id","url","title","price_total","surface_hab","bedrooms",
-        "copro_lots","charges_copro_an","taxe_fonciere","ppr_zone","plu_zone",
-        "age_days","price_drop_pct","status","rent_potential","capex_ratio",
-        "yield_net","cashflow","division_possible","colocation_ready","outdoor",
-        "sanitation","dist_amen_min","photos","source_name"
-    ]
-    if not rows:
-        df = pd.DataFrame(columns=base_cols)
-    else:
-        df = pd.DataFrame(rows)
-        for c in base_cols:
-            if c not in df.columns:
-                df[c] = None
-        df = df[base_cols]
-    # garde-fous
+BASE_COLS = [
+    "id","url","title","price_total","surface_hab","bedrooms",
+    "copro_lots","charges_copro_an","taxe_fonciere","ppr_zone","plu_zone",
+    "age_days","price_drop_pct","status","rent_potential","capex_ratio",
+    "yield_net","cashflow","division_possible","colocation_ready","outdoor",
+    "sanitation","dist_amen_min","photos","source_name"
+]
+
+
+def _ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Crée toutes les colonnes attendues si absentes, avec des valeurs sûres."""
+    for c in BASE_COLS:
+        if c not in df.columns:
+            df[c] = None
+    # defaults robustes
     if "id" not in df.columns:
         df["id"] = df.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x))
-    if "price_drop_pct" not in df.columns:
-        df["price_drop_pct"] = 0.0
+    else:
+        df["id"] = df["id"].where(df["id"].notna(), df.get("url", pd.Series(dtype=str)).fillna("").apply(lambda x: hash(x)))
+
     if "status" not in df.columns:
         df["status"] = "available"
+    df["status"] = df["status"].fillna("available")
+
+    if "price_drop_pct" not in df.columns:
+        df["price_drop_pct"] = 0.0
+    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
+
+    # Sous-ensemble minimal numérique pour éviter autres KeyError
+    for c in ["price_total", "surface_hab", "bedrooms"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     return df
 
 
+def load_sources_data() -> pd.DataFrame:
+    rows = collect_all()  # liste de dicts (peut être vide)
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=BASE_COLS)
+    df = _ensure_cols(df)
+    return df[BASE_COLS]
+
+
 def read_snapshot() -> pd.DataFrame:
-    """Lit le snapshot historique et garantit les colonnes requises."""
     cols = ["id","first_seen","last_seen","last_price","status","price_drop_pct"]
     if os.path.exists(SNAPSHOT_CSV):
         snap = pd.read_csv(SNAPSHOT_CSV)
     else:
         snap = pd.DataFrame(columns=cols)
-    # ajoute colonnes manquantes si ancien fichier
+    # Garantir structure même si ancien fichier
     for c in cols:
         if c not in snap.columns:
             snap[c] = pd.NA
-    # types
-    snap["price_drop_pct"] = pd.to_numeric(snap["price_drop_pct"], errors="coerce").fillna(0.0)
     snap["status"] = snap["status"].fillna("available")
+    snap["price_drop_pct"] = pd.to_numeric(snap["price_drop_pct"], errors="coerce").fillna(0.0)
     return snap[cols]
 
 
@@ -71,14 +82,14 @@ def write_snapshot(df: pd.DataFrame) -> None:
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
-    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
     df["status"] = df["status"].fillna("available")
+    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
     df[cols].to_csv(SNAPSHOT_CSV, index=False)
 
 
 def update_history(df_now: pd.DataFrame) -> pd.DataFrame:
-    """Met à jour first_seen / last_seen / last_price / price_drop_pct."""
     ensure_dirs()
+    df_now = _ensure_cols(df_now.copy())
     prev = read_snapshot().set_index("id")
 
     out = []
@@ -110,6 +121,7 @@ def update_history(df_now: pd.DataFrame) -> pd.DataFrame:
             ))
 
     snap_new = pd.DataFrame(out)
+    snap_new = _ensure_cols(snap_new)  # assure status/price_drop_pct présents
     write_snapshot(snap_new)
     return snap_new
 
@@ -118,16 +130,20 @@ def enrich_with_history(df: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.assign(price_drop_pct=0.0, age_days=0, is_returned=False, status="available")
 
-    # garantir colonnes hist
-    cols = ["id","first_seen","last_seen","last_price","status","price_drop_pct"]
-    for c in cols:
+    # Sécuriser hist
+    for c in ["id","first_seen","last_seen","last_price","status","price_drop_pct"]:
         if c not in hist.columns:
             hist[c] = pd.NA
-    hist["price_drop_pct"] = pd.to_numeric(hist["price_drop_pct"], errors="coerce").fillna(0.0)
     hist["status"] = hist["status"].fillna("available")
+    hist["price_drop_pct"] = pd.to_numeric(hist["price_drop_pct"], errors="coerce").fillna(0.0)
 
-    merged = df.merge(hist[cols], on="id", how="left")
-    # si price_drop_pct a disparu pendant le merge (ne devrait pas), on recrée
+    merged = df.merge(hist[["id","first_seen","last_seen","last_price","status","price_drop_pct"]], on="id", how="left")
+
+    # Filets post-merge
+    if "status" not in merged.columns:
+        merged["status"] = "available"
+    merged["status"] = merged["status"].fillna("available")
+
     if "price_drop_pct" not in merged.columns:
         merged["price_drop_pct"] = 0.0
     merged["price_drop_pct"] = pd.to_numeric(merged["price_drop_pct"], errors="coerce").fillna(0.0)
@@ -137,7 +153,6 @@ def enrich_with_history(df: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
         lambda x: 0 if pd.isna(x) else (pd.Timestamp.utcnow() - pd.to_datetime(x, utc=True)).days
     )
     merged["is_returned"] = False
-    merged["status"] = merged["status"].fillna("available")
     return merged
 
 
@@ -149,18 +164,21 @@ def main():
     targets = build_targets(crit_df)
 
     # 2) Collecte
-    raw = load_sources_data()
+    raw = load_sources_data()          # garantit status/price_drop_pct
+    hist = update_history(raw)         # garantit status/price_drop_pct dans snapshot
 
-    # 3) Historique
-    hist = update_history(raw)
-
-    # 4) Normalisation + enrichissement
-    df = normalize(raw)
-    if "price_drop_pct" not in df.columns:  # filet de sécurité
+    # 3) Normalisation + enrichissement
+    df = normalize(raw)                # remet toutes les colonnes attendues
+    if "status" not in df.columns:
+        df["status"] = "available"
+    df["status"] = df["status"].fillna("available")
+    if "price_drop_pct" not in df.columns:
         df["price_drop_pct"] = 0.0
+    df["price_drop_pct"] = pd.to_numeric(df["price_drop_pct"], errors="coerce").fillna(0.0)
+
     df = enrich_with_history(df, hist)
 
-    # 5) Scoring
+    # 4) Scoring
     scores, logs = [], []
     for _, row in df.iterrows():
         s, e = score_listing(row, targets, cat_weights)
@@ -174,7 +192,7 @@ def main():
         df["score"] = []
         df["explications"] = []
 
-    # 6) Exports
+    # 5) Exports
     df.head(10).to_excel("output/top10.xlsx", index=False)
     df.to_csv("output/all_listings.csv", index=False)
     with open("reports/top10.html", "w", encoding="utf-8") as f:
