@@ -110,6 +110,14 @@ def show_top():
     if df.empty:
         st.info("Aucune annonce chargée pour l’instant. Les connecteurs s’exécutent — repasse plus tard.")
         return
+    # on garde les biens avec prix > 0
+    try:
+        df = df[pd.to_numeric(df["price_total"], errors="coerce").fillna(0) > 0]
+    except Exception:
+        pass
+    if df.empty:
+        st.info("Aucune annonce exploitable (prix indisponible). On élargit la collecte.")
+        return
     for _, r in df.iterrows():
         card(r)
 
